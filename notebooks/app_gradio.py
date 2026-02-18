@@ -39,6 +39,7 @@ if PROJECT_ROOT not in sys.path:
 from sam2.build_sam import build_sam2_video_predictor
 import app_template_align as ta
 import maze_processing as mp
+import alpha_weight_calculator as awc
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.join(SCRIPT_DIR, 'video_to_img')
@@ -945,9 +946,9 @@ def build_app():
     video_dirs = list_video_dirs()
 
     with gr.Blocks(
-        title="拒绝无效加班！！！",
+        title="夸夸噜噜酱!!!",
     ) as app:
-        gr.Markdown("# SAM2 - YOLO → SHARED CONTREOL 端到端 拒绝无效加班！！！")
+        gr.Markdown("# SAM2 - YOLO → SHARED CONTREOL")
         gr.Markdown("视频切帧 → 点击选目标 → sam分割传播 → 导出 YOLO 数据集 → 训练 YOLO 模型 → SHARED CONTREOL 数据集")
 
         # ── Step 0: 视频切帧 ──
@@ -1151,7 +1152,7 @@ def build_app():
                             t4_clear_btn = gr.Button("清除标注", variant="secondary")
                             t4_preview_btn = gr.Button("预览 SAM Mask", variant="secondary")
                         t4_run_btn = gr.Button(
-                            "传播 + 补全 + 导出 YOLO", variant="primary", size="lg"
+                            "传播 + 补全 + 数据集导出(SAM + MASK ALIGN)", variant="primary", size="lg"
                         )
                         t4_pts_info = gr.Textbox(label="标注", lines=2, interactive=False)
                     with gr.Column(scale=2):
@@ -1210,6 +1211,85 @@ def build_app():
                             label="点击设置迷宫中心 | 预览叠加效果",
                             interactive=False,
                         )
+
+            with gr.Accordion("Step 4-4: Alpha 权重计算 (α weight calculation)", open=False):
+                gr.Markdown("""
+                **功能说明：**
+                - 根据 tracking_results.csv 计算双臂的控制权重 α
+                - α = 0 → 完全人类控制，α = 1 → 完全自主控制
+                - 可调节各项参数的权重来影响 α 的计算
+                """)
+                
+                with gr.Row():
+                    t44_dataset_dd = gr.Dropdown(
+                        choices=awc.list_datasets_for_alpha(),
+                        label="选择数据集",
+                        info="mask_align_sam2_dataset/ 下含 tracking_results.csv 的文件夹",
+                    )
+                    t44_load_btn = gr.Button("加载数据", variant="primary")
+                
+                # 帧间隔选择
+                with gr.Row():
+                    t44_frame_interval = gr.Slider(
+                        minimum=1, maximum=8, value=4, step=1,
+                        label="帧间隔 (计算速度用的帧数)",
+                        info="选择4-8帧来计算速度等参数"
+                    )
+                
+                # 权重设置
+                gr.Markdown("### 参数权重设置 (左右臂独立)")
+                
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**左臂权重**")
+                        w_vl = gr.Slider(0, 1, 0.25, step=0.05, label="速度权重")
+                        w_il = gr.Slider(0, 1, 0.25, step=0.05, label="IoU权重")
+                        w_bl = gr.Slider(0, 1, 0.20, step=0.05, label="分叉距离权重")
+                        w_tl = gr.Slider(0, 1, 0.15, step=0.05, label="目标距离权重")
+                        w_wl = gr.Slider(0, 1, 0.15, step=0.05, label="壁面距离权重")
+                    
+                    with gr.Column():
+                        gr.Markdown("**右臂权重**")
+                        w_vr = gr.Slider(0, 1, 0.25, step=0.05, label="速度权重")
+                        w_ir = gr.Slider(0, 1, 0.25, step=0.05, label="IoU权重")
+                        w_br = gr.Slider(0, 1, 0.20, step=0.05, label="分叉距离权重")
+                        w_tr = gr.Slider(0, 1, 0.15, step=0.05, label="目标距离权重")
+                        w_wr = gr.Slider(0, 1, 0.15, step=0.05, label="壁面距离权重")
+                
+                # FSR 传感器值
+                with gr.Row():
+                    t44_fsr_left = gr.Slider(
+                        0, 1, 0.5, step=0.05,
+                        label="左臂 FSR 值 (人类操作意愿)",
+                    )
+                    t44_fsr_right = gr.Slider(
+                        0, 1, 0.5, step=0.05,
+                        label="右臂 FSR 值 (人类操作意愿)",
+                    )
+                
+                # 计算按钮
+                with gr.Row():
+                    t44_compute_btn = gr.Button("计算 Alpha 权重", variant="primary")
+                    t44_export_btn = gr.Button("导出结果", variant="secondary")
+                
+                # 结果显示
+                t44_result = gr.Textbox(label="计算结果", lines=15, interactive=False)
+                
+                # 轨迹与速度可视化
+                gr.Markdown("### 轨迹与速度可视化")
+                with gr.Row():
+                    t44_viz_btn = gr.Button("生成轨迹与速度图", variant="primary")
+                
+                with gr.Row():
+                    t44_trajectory_img = gr.HTML(label="轨迹可视化")
+                    t44_speed_img = gr.HTML(label="速度曲线")
+                
+                t44_viz_info = gr.Textbox(label="统计信息", lines=12, interactive=False)
+                
+                # 壁面距离可视化
+                gr.Markdown("### 壁面距离可视化 (类似 Step 3 运动分析)")
+                with gr.Row():
+                    t44_wall_dist_img = gr.HTML(label="壁面距离可视化")
         # ── 事件绑定 ──
 
         # 切帧
@@ -1396,6 +1476,110 @@ def build_app():
         _t43_s_out = [t43_overlay_img, t43_info]
         for ctrl in [t43_scale, t43_angle, t43_alpha]:
             ctrl.release(fn=mp.on_slider, inputs=_t43_s_in, outputs=_t43_s_out)
+
+        # ── Step 4-4: Alpha 权重计算回调绑定 ──
+        t44_load_btn.click(
+            awc.on_load_alpha_dataset,
+            [t44_dataset_dd],
+            [t44_result, t44_trajectory_img, t44_frame_interval, t44_frame_interval],
+        )
+        
+        def compute_alpha_callback(
+            dataset_name, frame_interval,
+            w_vl, w_bl, w_tl, w_wl,
+            w_vr, w_br, w_tr, w_wr,
+            fsr_left, fsr_right
+        ):
+            """计算左右臂的 α 权重"""
+            # 左臂权重
+            weights_left = {
+                'velocity': w_vl,
+                'iou': w_vl,  # 使用速度的权重，因为删除了distance
+                'bifurcation': w_bl,
+                'target': w_tl,
+                'wall_distance': w_wl
+            }
+            # 右臂权重
+            weights_right = {
+                'velocity': w_vr,
+                'iou': w_vr,
+                'bifurcation': w_br,
+                'target': w_tr,
+                'wall_distance': w_wr
+            }
+            
+            # 归一化权重（确保总和为1）
+            total_left = sum(weights_left.values())
+            total_right = sum(weights_right.values())
+            if total_left > 0:
+                weights_left = {k: v/total_left for k, v in weights_left.items()}
+            if total_right > 0:
+                weights_right = {k: v/total_right for k, v in weights_right.items()}
+            
+            # 先用左臂权重计算
+            result = awc.compute_alpha_weights(
+                dataset_name,
+                frame_interval=frame_interval,
+                weights=weights_left,
+                fsr_left=fsr_left,
+                fsr_right=fsr_right
+            )
+            
+            if 'error' in result:
+                return result.get('error', "计算错误"), None, None
+            
+            # 格式化输出
+            output = f"✅ Alpha 权重计算完成\n\n"
+            output += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            output += f"  左臂 α = {result['alpha_left']:.4f}\n"
+            output += f"  右臂 α = {result['alpha_right']:.4f}\n"
+            output += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            output += f"📊 特征值详情:\n"
+            f = result['features']
+            output += f"  • 速度 (左/右/整体): {f['velocity_left']:.3f} / {f['velocity_right']:.3f} / {f['velocity_overall']:.3f}\n"
+            output += f"  • IoU: {f['iou']:.4f}\n"
+            output += f"  • 壁面距离 (左/右): {f.get('wall_dist_left', 0):.3f} / {f.get('wall_dist_right', 0):.3f}\n"
+            output += f"  • 分叉距离: {f['bif_dist']:.3f}\n"
+            output += f"  • 目标距离: {f['target_dist']:.3f}\n"
+            
+            # 原始数据
+            raw = result.get('raw_data', {})
+            output += f"\n📍 位置数据 (最新帧):\n"
+            output += f"  • 质心: ({raw.get('centroid', (0,0))[0]:.1f}, {raw.get('centroid', (0,0))[1]:.1f})\n"
+            output += f"  • 底部端点: ({raw.get('bottom', (0,0))[0]:.1f}, {raw.get('bottom', (0,0))[1]:.1f})\n"
+            output += f"  • 顶部端点: ({raw.get('top', (0,0))[0]:.1f}, {raw.get('top', (0,0))[1]:.1f})"
+            
+            return output, None, None
+        
+        t44_compute_btn.click(
+            compute_alpha_callback,
+            [t44_dataset_dd, t44_frame_interval,
+             w_vl, w_bl, w_tl, w_wl,
+             w_vr, w_br, w_tr, w_wr,
+             t44_fsr_left, t44_fsr_right],
+            [t44_result, t44_trajectory_img, t44_speed_img],
+        )
+        
+        def export_alpha_callback(dataset_name):
+            if not dataset_name:
+                return "请先选择数据集"
+            output_path = awc.export_alpha_results(dataset_name)
+            if output_path:
+                return f"✅ 已导出到: {output_path}"
+            return "❌ 导出失败"
+        
+        t44_export_btn.click(
+            export_alpha_callback,
+            [t44_dataset_dd],
+            [t44_result],
+        )
+        
+        # 轨迹与速度可视化
+        t44_viz_btn.click(
+            awc.on_visualize_trajectory,
+            [t44_dataset_dd, t44_frame_interval],
+            [t44_trajectory_img, t44_speed_img, t44_viz_info, t44_wall_dist_img],
+        )
 
     return app
 
